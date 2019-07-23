@@ -13,7 +13,7 @@ import tensorflow as tf
 import numpy as np
 from PIL import Image
 from tensorflow.examples.tutorials.mnist import input_data
-
+import subprocess
 # import the Chris app superclass
 from chrisapp.base import ChrisApp
 
@@ -127,9 +127,6 @@ class Tensorflowapp(ChrisApp):
 
         # TODO Add code to do the inference operation here
 
-
-
-
     def mnist_training(self, options, digit_image):
         print("Currently running as User ID: %s " % os.getuid())
         print("Trying to read from the directory %s " % options.inputdir)
@@ -164,14 +161,21 @@ class Tensorflowapp(ChrisApp):
         steps_number = 1000
         batch_size = 100
 
+         # initializing JIT compilation
+        jit_scope = tf.contrib.compiler.jit.experimental_jit_scope
+
         with tf.device(f"/{options.processing_unit}:0"):
             # x is training data
             x = tf.placeholder(tf.float32, [None, image_size * image_size])
             labels = tf.placeholder(tf.float32, [None, labels_size])
             W = tf.Variable(tf.truncated_normal([image_size * image_size, labels_size], stddev=0.1))
             b = tf.Variable(tf.constant(0.1, shape=[labels_size]))
-            # y is the output
-            y = tf.matmul(x, W) + b
+
+            # enables JIT compilation for operators (mathmul will be compiled with XLA)
+            with jit_scope(): 
+                # y is the output
+                y = tf.matmul(x, W) + b
+            
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=y))
             training_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
             prediction = tf.equal(tf.argmax(y, 1), tf.argmax(labels, 1))

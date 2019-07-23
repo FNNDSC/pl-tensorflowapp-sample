@@ -33,4 +33,5 @@ ls -l /opt/app-root/
 #/opt/app-root/src/tf/tensorflow_model_server --port=6006 --model_name=$MODEL_NAME --model_base_path=/opt/app-root/src/$MODEL_PATH
 
 echo "---> Running Inference:"
-exec python /opt/app-root/src/tensorflowapp-sample/tensorflowapp-inference.py --prefix mnist- --inference_path /opt/app-root/src/input/test/test.png --saved_model_name my_saved_model /opt/app-root/src/output /opt/app-root/src/output
+export TF_XLA_FLAGS=--tf_xla_cpu_global_jit # required for JIT Compilation
+exec python /opt/app-root/src/tensorflowapp-sample/tensorflowapp-inference.py --prefix mnist- --inference_path /opt/app-root/src/input/test/test.png --saved_model_name my_saved_model --processing_unit gpu /opt/app-root/src/output /opt/app-root/src/output 

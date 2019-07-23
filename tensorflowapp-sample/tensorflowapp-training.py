@@ -114,15 +114,21 @@ class Tensorflowapp(ChrisApp):
         steps_number = 1000
         batch_size = 100
 
+        # initializing JIT compilation
+        jit_scope = tf.contrib.compiler.jit.experimental_jit_scope
+
         with tf.device(f"/{options.processing_unit}:0"):
             # x is training data
             x = tf.placeholder(tf.float32, [None, image_size * image_size], name="myInput")
             labels = tf.placeholder(tf.float32, [None, labels_size])
             W = tf.Variable(tf.truncated_normal([image_size * image_size, labels_size], stddev=0.1))
             b = tf.Variable(tf.constant(0.1, shape=[labels_size]))
-            # y is the output
-            y = tf.matmul(x, W) + b
-        
+
+            # enables JIT compilation for operators (mathmul will be compiled with XLA)
+            with jit_scope(): 
+                # y is the output
+                y = tf.matmul(x, W) + b
+
             y = tf.nn.softmax(tf.matmul(x, W) + b, name="myOutput")
             loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=y))
             training_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
