@@ -60,6 +60,9 @@ class Tensorflowapp(ChrisApp):
         self.add_argument('--saved_model_name', dest='saved_model_name',
                           type=str, optional=False,
                           help='name for exporting saved model')
+        self.add_argument("--processing_unit", dest='processing_unit', 
+                          type=str, optional=False,
+                        help="Type of Processing Unit (GPU or CPU)")
 
     def run(self, options):
         """
@@ -110,43 +113,53 @@ class Tensorflowapp(ChrisApp):
         learning_rate = 0.05
         steps_number = 1000
         batch_size = 100
-        # x is training data
-        x = tf.placeholder(tf.float32, [None, image_size * image_size], name="myInput")
-        labels = tf.placeholder(tf.float32, [None, labels_size])
-        W = tf.Variable(tf.truncated_normal([image_size * image_size, labels_size], stddev=0.1))
-        b = tf.Variable(tf.constant(0.1, shape=[labels_size]))
-        # y is the output
-        #y = tf.matmul(x, W) + b
-        y = tf.nn.softmax(tf.matmul(x, W) + b, name="myOutput")
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=y))
-        training_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
-        prediction = tf.equal(tf.argmax(y, 1), tf.argmax(labels, 1))
-        accuracy = tf.reduce_mean(tf.cast(prediction, tf.float32))
-        sess = tf.InteractiveSession()
-        sess.run(tf.global_variables_initializer())
-        for i in range(steps_number):
-            input_batch, labels_batch = mnist.train.next_batch(batch_size)
-            feed_dict = {x: input_batch, labels: labels_batch}
-            training_step.run(feed_dict=feed_dict)
-            if i % 100 == 0:
-                train_accuracy = accuracy.eval(feed_dict=feed_dict)
-                print("Step %d, training batch accuracy %g %%" % (i, train_accuracy * 100))
-        test_accuracy = accuracy.eval(feed_dict={x: mnist.test.images, labels: mnist.test.labels})
-        acc = test_accuracy * 100
-        print("Test accuracy: ", acc)
-        self.create_output(options, "accuracy", acc)
 
-        if digit_image is not None:
-            prediction = sess.run(y, feed_dict={x: digit_image}).argmax()
-            print("Inference value of test Image is : ", prediction)
-            self.create_output(options, "inference", prediction)
+        # initializing JIT compilation
+        jit_scope = tf.contrib.compiler.jit.experimental_jit_scope
 
-        # Save the trained model
-        str_outpath = os.path.join(options.outputdir, options.saved_model_name, self.VERSION)
-        builder = tf.saved_model.builder.SavedModelBuilder(str_outpath)
-        builder.add_meta_graph_and_variables(
-            sess, [tf.saved_model.tag_constants.SERVING])
-        builder.save()
+        with tf.device(f"/{options.processing_unit}:0"):
+            # x is training data
+            x = tf.placeholder(tf.float32, [None, image_size * image_size], name="myInput")
+            labels = tf.placeholder(tf.float32, [None, labels_size])
+            W = tf.Variable(tf.truncated_normal([image_size * image_size, labels_size], stddev=0.1))
+            b = tf.Variable(tf.constant(0.1, shape=[labels_size]))
+
+            # enables JIT compilation for operators (mathmul will be compiled with XLA)
+            with jit_scope(): 
+                # y is the output
+                y = tf.matmul(x, W) + b
+
+            y = tf.nn.softmax(tf.matmul(x, W) + b, name="myOutput")
+            loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=y))
+            training_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
+            prediction = tf.equal(tf.argmax(y, 1), tf.argmax(labels, 1))
+            accuracy = tf.reduce_mean(tf.cast(prediction, tf.float32))
+
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+            for i in range(steps_number):
+                input_batch, labels_batch = mnist.train.next_batch(batch_size)
+                feed_dict = {x: input_batch, labels: labels_batch}
+                training_step.run(feed_dict=feed_dict)
+                if i % 100 == 0:
+                    train_accuracy = accuracy.eval(feed_dict=feed_dict)
+                    print("Step %d, training batch accuracy %g %%" % (i, train_accuracy * 100))
+            test_accuracy = accuracy.eval(feed_dict={x: mnist.test.images, labels: mnist.test.labels})
+            acc = test_accuracy * 100
+            print("Test accuracy: ", acc)
+            self.create_output(options, "accuracy", acc)
+
+            if digit_image is not None:
+                prediction = sess.run(y, feed_dict={x: digit_image}).argmax()
+                print("Inference value of test Image is : ", prediction)
+                self.create_output(options, "inference", prediction)
+
+            # Save the trained model
+            str_outpath = os.path.join(options.outputdir, options.saved_model_name, self.VERSION)
+            builder = tf.saved_model.builder.SavedModelBuilder(str_outpath)
+            builder.add_meta_graph_and_variables(
+                sess, [tf.saved_model.tag_constants.SERVING])
+            builder.save()
 
 
     def create_output(self, options, key, value):
